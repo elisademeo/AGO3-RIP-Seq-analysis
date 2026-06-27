@@ -11,7 +11,6 @@ The workflow includes:
 - genome alignment
 - read counting
 - normalization
-- genomic feature annotation
 - small RNA characterization
 
 Input data are available from the NCBI Sequence Read Archive under accession PRJNA1482216.
