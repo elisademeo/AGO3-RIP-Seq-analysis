@@ -1,0 +1,177 @@
+############################################################
+# AGO3-IP small RNA sequencing analysis pipeline
+#
+# Authors: Elisa De Meo, Matteo Dell'Acqua, Svenja Mager
+#
+# Description:
+# Pipeline used for the analysis of AGO3-associated
+# small RNA sequencing data generated from HA-AGO3
+# immunoprecipitation experiments in Arabidopsis thaliana.
+#
+# The workflow includes:
+# - FastQC
+# - Trimmomatic
+# - STAR alignment
+# - HTSeq counting
+# - RPM normalization
+# - genomic feature annotation
+# - 5' nucleotide and length analysis
+#
+############################################################
+
+# download the raw reads 
+# download genome file "TAIR10_chr_all.fas.gz" from https://www.arabidopsis.org/download/index-auto.jsp?dir=%2Fdownload_files%2FGenes%2FTAIR10_genome_release%2FTAIR10_chromosome_files
+# download annotation file "Araport11_GFF3_genes_transposons.current.gff.gz" from https://www.arabidopsis.org/download/index-auto.jsp?dir=%2Fdownload_files%2FGenes%2FAraport11_genome_release
+# download miRNA annotation file "ath.gff3" https://mirbase.org/download/
+
+### quality Check Of Raw Reads Via Fastqc
+fastqc ./1_raw_reads/31123-001.R1.fastq.gz -out ./2_fastQC
+# ....repeat for each of the files
+
+### trimming Of Raw Reads With Trimmomatic
+# create a fasta file with adapter sequences to be filtered
+trimmomatic SE -phred33 31123-001.R1.fastq.gz 31123-001.R1.trimmed.fastq.gz ILLUMINACLIP:adapter_19nt_common.fa:2:30:10 MINLEN:15
+# ....repeat for each of the files
+
+### Index The Reference Genome
+~/STAR-2.7.11a/bin/Linux_x86_64/STAR --runThreadN 6 --runMode genomeGenerate --genomeDir ~/pipeline_20250304/genome_resources --genomeFastaFiles ~/pipeline_20250304/genome_resources/TAIR10_chr_all.fa --sjdbGTFfile ~/pipeline_20250304/genome_resources/sorted_Araport11_GFF3_genes_transposons.current.gff --sjdbGTFtagExonParentTranscript Parent --sjdbOverhang 74
+
+### Align Reads
+~/STAR-2.7.11a/bin/Linux_x86_64/STAR --runThreadN 6 --genomeDir ~/pipeline_20250304/genome_resources --readFilesIn 31123-001.R1.trimmed.fastq.gz --readFilesCommand zcat --outFilterMismatchNoverLmax 0.05 --outFileNamePrefix 31123-001_ --outSAMattrRGline ID:id31123-001 SM:sm31123-001 --outSAMtype BAM SortedByCoordinate --outReadsUnmapped Fastx
+# ....repeat for each of the files
+
+### Get Mapping And Quality Control Statistics
+qualimap bamqc -bam 31123-001_Aligned.sortedByCoord.out.bam -outfile sample_qualimap.pdf --java-mem-size=40G
+# ....repeat for each of the files
+qualimap rnaseq -bam 31123-001_Aligned.sortedByCoord.out.bam -gtf small_rnas.gtf -oc sample_counts - outdir path/to/output/folder/
+# ....repeat for each of the files
+
+### Filter bam file to extract reads of a certain length (e.g. 21-22nt)
+~/programs/bbmap/reformat.sh in=~/bam_files/31123-001_Aligned.sortedByCoord.out.bam out=~/bam_files_21-22nt/31123-001_21-22nt.bam minlength=21 maxlength=22 ref=TAIR10_chr_all.fa
+# ....repeat for each of the files
+
+### Create 500 Bp Non-Overlapping Bins
+bedtools makewindows -g chrNameLength.txt -w 500 > bins.bed
+
+###Count Reads Per Bin
+htseq-count -f bam -s no -t exon --stranded=no ~/bam_files_21-22nt/31123-001_21-22nt.bam ~/bam_files_21nt/bins.gff > ~/bins_counts_21-22nt/31123-001_21-22nt_htseq_binscount.out
+# ....repeat for each of the files
+
+### Create a xlsx file with the coverage columns aligned for all the samples, use the following script to filter bins by significance (Jullien et al., 2020):
+
+import pandas as pd
+
+input_file = 'bins_aligned.xlsx'
+output_file = 'bins_aligned_filtered.xlsx'
+
+df = pd.read_excel(input_file)
+
+condition = (df.iloc[:, 1:5] < 5).all(axis=1)
+
+df_filtered = df[~condition]
+
+df_filtered.to_excel(output_file, index=False)
+
+print(f"Filtered data saved to {output_file}")
+
+### normalize counts in bins to RPM in R
+
+library(edgeR)
+
+counts <- read.csv("bins_aligned_filtered.csv", header=TRUE, row.names=1)
+
+dge <- DGEList(counts)
+
+dge <- calcNormFactors(dge)
+
+normalized_counts <- cpm(dge, normalized.lib.size = TRUE)
+
+write.csv(normalized_counts, file="bins_aligned_filtered_rpm.CSV")
+
+### Filter enriched bins in excel according to established criteria
+
+###Select bins that are positively enriched using the the following script:
+
+import pandas as pd
+
+input_excel_file = 'bins_input.xlsx'
+output_excel_file = 'bins_output.xlsx'
+
+df = pd.read_excel(input_excel_file)
+
+df_filtered = df[df.iloc[:, 10] == 'Yes']
+
+df_filtered.to_excel(output_excel_file, index=False)
+
+print(f"Filtered data saved to {output_excel_file}")
+
+### Obtain bins Chr, Start, end of the bins defining regions of interest in excel
+
+###filter this file using the previous script modified according to new columns and directory
+
+###extract regions of interest from original .bam files
+samtools view -b -L regions_of_interest.txt input.bam -o output.bam
+# ....repeat for each of the files
+
+###get miRNAs counts for regions of interest
+ 
+htseq-count \
+  -f bam \
+  -s no \
+  -t miRNA \
+  output.bam \
+  ath_mod.gff3 \
+  > regions_mirna_counts.out
+# ....repeat for each of the files
+
+### filter counts using the following script:
+
+import pandas as pd
+
+input_file = 'mirna_counts.xlsx'
+output_file = 'mirna_counts_filtered.xlsx'
+
+df = pd.read_excel(input_file)
+
+filtered_df = df[df.iloc[:, 1:].ge(1).any(axis=1)]
+
+filtered_df.to_excel(output_file, index=False)
+
+print(f"Filtered data saved to {output_file}")
+
+###normalize to RPM in R as before
+
+###5' preference and length distribution 
+samtools view -F 4 output.bam | awk '{len=length($10); count[len]++; base[substr($10,1,1), len]++} END {for (i in count) {print count[i], i, base["A", i]+0, base["T", i]+0, base["G", i]+0, base["C", i]+0}}' | sort -k2,2n > output_read_length_freqs_and_first_base.txt
+# ....repeat for each of the files
+
+### Genomic features
+
+sort -k1,1 -k4,4n -k5,5n Araport11_GFF3_genes_transposons.current.gff > sorted_Araport11_GFF3_genes_transposons.current.gff 
+
+awk -F'\t' 'NF == 9' sorted_Araport11_GFF3_genes_transposons.current.gff > cleaned_sorted_Araport11_GFF3_genes_transposons.current.gff
+
+bedtools complement -i cleaned_sorted_Araport11_GFF3_genes_transposons.current.gff -g chrNameLength.txt > Araport11_GFF3_intergenic.gff
+
+awk '{print $0 "\tintergenic_region"}' Araport11_GFF3_intergenic.gff > Araport11_GFF3_intergenic_regions.gff
+
+awk 'BEGIN{OFS="\t"} {print $1, ".", $4, $2, $3, ".", ".", ".", "-"}' Araport11_GFF3_intergenic_regions.gff > Araport11_GFF3_intergenic_regions_formatted.gff
+
+cat cleaned_sorted_Araport11_GFF3_genes_transposons.current.gff Araport11_GFF3_intergenic_regions_formatted.gff > cleaned_sorted_Araport11_GFF3_genes_transposons.current.gff
+
+bedtools coverage -a cleaned_sorted_Araport11_GFF3_genes_transposons.current.gff -b output.bam -f 0.5 > output_enriched_genomic_features.txt
+
+### normalize to rpm as before and calculate percentages
+
+
+
+
+
+
+
+
+
+
+
+
+
