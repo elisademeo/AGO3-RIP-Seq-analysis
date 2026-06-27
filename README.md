@@ -1,2 +1,17 @@
 # AGO3-RIP-Seq-analysis
-This repository contains the scripts used for the analysis of AGO3-associated small RNA sequencing data generated from HA-AGO3 immunoprecipitation experiments in Arabidopsis thaliana. 
+
+This repository contains the pipeline used to analyse AGO3-associated small RNA sequencing data described in:
+
+De Meo E. PhD Thesis (2026)
+
+The workflow includes:
+
+- quality control
+- adapter trimming
+- genome alignment
+- read counting
+- normalization
+- genomic feature annotation
+- small RNA characterization
+
+Input data are available from the NCBI Sequence Read Archive under accession PRJNA1482216.
