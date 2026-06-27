@@ -13,4 +13,20 @@ The workflow includes:
 - normalization
 - small RNA characterization
 
-Input data are available from the NCBI Sequence Read Archive under accession PRJNA1482216.
+## Requirements
+
+The pipeline was developed using:
+
+- FastQC
+- Trimmomatic
+- STAR (v2.7.11a)
+- Qualimap
+- samtools
+- bedtools
+- HTSeq
+- Python 3
+- R (edgeR)
+
+## Data availability
+
+The raw sequencing data associated with this pipeline are available from the NCBI Sequence Read Archive (SRA) under BioProject accession PRJNA1482216.
